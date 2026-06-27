@@ -18,7 +18,11 @@ return Application::configure(basePath: dirname(__DIR__))
     $middleware->alias([
         'admin' => \App\Http\Middleware\AdminMiddleware::class,
     ]);
+
 })
+    ->withCommands([
+    \App\Console\Commands\ExpireOrders::class,
+    ])
     ->withExceptions(function (Exceptions $exceptions) {
         //
     })->create();
