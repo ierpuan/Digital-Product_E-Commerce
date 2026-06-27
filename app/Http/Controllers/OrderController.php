@@ -8,6 +8,8 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 class OrderController extends Controller
 {
@@ -111,7 +113,14 @@ class OrderController extends Controller
             return redirect()->route('orders.show', $order->id);
         }
 
-        return view('orders.payment', compact('order'));
+        $snapToken = $this->createMidtransSnapToken($order);
+
+        return view('orders.payment', [
+            'order' => $order,
+            'snapToken' => $snapToken,
+            'midtransClientKey' => config('services.midtrans.client_key'),
+            'midtransIsProduction' => (bool) config('services.midtrans.is_production'),
+        ]);
     }
 
     // GET /orders/{order}
@@ -139,5 +148,74 @@ class OrderController extends Controller
             ->paginate(10);
 
         return view('orders.history', compact('orders'));
+    }
+
+    private function createMidtransSnapToken(Order $order): ?string
+    {
+        $serverKey = config('services.midtrans.server_key');
+
+        if (!$serverKey) {
+            return null;
+        }
+
+        $order->loadMissing('user', 'orderItems');
+
+        $payload = [
+            'transaction_details' => [
+                'order_id' => $order->invoice_no,
+                'gross_amount' => (int) $order->total,
+            ],
+            'customer_details' => [
+                'first_name' => $order->user->name,
+                'email' => $order->user->email,
+            ],
+            'item_details' => $order->orderItems->map(fn ($item) => [
+                'id' => (string) $item->product_id,
+                'price' => (int) $item->price,
+                'quantity' => 1,
+                'name' => $item->product_name,
+            ])->values()->all(),
+            'callbacks' => [
+                'finish' => route('orders.show', $order->id),
+            ],
+        ];
+
+        if ((int) $order->discount > 0) {
+            $payload['item_details'][] = [
+                'id' => 'DISCOUNT',
+                'price' => -1 * (int) $order->discount,
+                'quantity' => 1,
+                'name' => 'Diskon',
+            ];
+        }
+
+        $baseUrl = config('services.midtrans.is_production')
+            ? 'https://app.midtrans.com'
+            : 'https://app.sandbox.midtrans.com';
+
+        try {
+            $response = Http::withBasicAuth($serverKey, '')
+                ->acceptJson()
+                ->post($baseUrl . '/snap/v1/transactions', $payload);
+
+            if ($response->failed()) {
+                Log::warning('[Midtrans] Gagal membuat Snap token', [
+                    'invoice' => $order->invoice_no,
+                    'status' => $response->status(),
+                    'body' => $response->json(),
+                ]);
+
+                return null;
+            }
+
+            return $response->json('token');
+        } catch (\Throwable $e) {
+            Log::error('[Midtrans] Error membuat Snap token', [
+                'invoice' => $order->invoice_no,
+                'message' => $e->getMessage(),
+            ]);
+
+            return null;
+        }
     }
 }

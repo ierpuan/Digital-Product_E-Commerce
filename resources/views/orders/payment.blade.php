@@ -37,15 +37,40 @@
             <strong>{{ $order->expired_at?->format('d M Y H:i') }}</strong>
         </p>
 
-        {{-- Di sini biasanya ditampilkan Snap Midtrans / redirect Xendit --}}
-        <div class="bg-gray-50 border border-dashed border-gray-200 rounded-lg p-4 text-sm text-gray-400">
-            <i class="ti ti-credit-card text-2xl mb-2 block"></i>
-            Integrasi payment gateway (Midtrans Snap / Xendit) dipasang di sini.
-        </div>
+        @if($snapToken && $midtransClientKey)
+            <button id="pay-button" class="w-full bg-indigo-600 text-white py-3 rounded-xl font-semibold hover:bg-indigo-700 transition">
+                <i class="ti ti-credit-card mr-1"></i>Bayar Sekarang
+            </button>
+        @else
+            <div class="bg-yellow-50 border border-yellow-100 rounded-lg p-4 text-sm text-yellow-700">
+                <i class="ti ti-alert-circle text-2xl mb-2 block"></i>
+                Midtrans belum aktif. Isi MIDTRANS_SERVER_KEY dan MIDTRANS_CLIENT_KEY di file .env.
+            </div>
+        @endif
 
         <a href="{{ route('orders.history') }}" class="block mt-4 text-sm text-indigo-500 hover:underline">
             Lihat semua pesanan
         </a>
     </div>
 </div>
+
+@if($snapToken && $midtransClientKey)
+    <script src="{{ $midtransIsProduction ? 'https://app.midtrans.com/snap/snap.js' : 'https://app.sandbox.midtrans.com/snap/snap.js' }}" data-client-key="{{ $midtransClientKey }}"></script>
+    <script>
+        document.getElementById('pay-button').addEventListener('click', function () {
+            window.snap.pay('{{ $snapToken }}', {
+                onSuccess: function () {
+                    window.location.href = '{{ route('orders.show', $order->id) }}';
+                },
+                onPending: function () {
+                    window.location.href = '{{ route('orders.history') }}';
+                },
+                onError: function () {
+                    window.location.href = '{{ route('orders.payment', $order->id) }}';
+                },
+                onClose: function () {}
+            });
+        });
+    </script>
+@endif
 @endsection
